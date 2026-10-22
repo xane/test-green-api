@@ -89,7 +89,18 @@ export class GreenApi {
             : {}),
         },
       );
+      const text = await response.text();
       if (!response.ok) {
+        // MAX can restrict sending while the credentials and receiving still work.
+        if (
+          response.status === 403 &&
+          method === 'sendMessage' &&
+          text.includes('Your account is suspended')
+        ) {
+          throw new ApiError(
+            'MAX временно ограничил отправку сообщений. Проверьте ограничения аккаунта в MAX.',
+          );
+        }
         if (response.status === 401 || response.status === 403) {
           throw new ApiError(
             'GREEN-API отклонил доступ. Проверьте реквизиты и состояние инстанса в кабинете.',
@@ -102,7 +113,6 @@ export class GreenApi {
           `Ошибка GREEN-API (HTTP ${response.status}). Проверьте настройки инстанса.`,
         );
       }
-      const text = await response.text();
       if (!text.trim()) return null;
       try {
         return JSON.parse(text) as unknown;
@@ -140,6 +150,11 @@ export class GreenApi {
       typeof settings.incomingWebhook !== 'string'
     ) {
       throw new ApiError('Не удалось проверить настройки уведомлений инстанса.');
+    }
+    if (settings.typeInstance !== 'v3') {
+      throw new ApiError(
+        'Для этого чата нужен инстанс MAX (typeInstance: v3). Выберите его реквизиты в кабинете GREEN-API.',
+      );
     }
     if (settings.webhookUrl.trim() || settings.incomingWebhook !== 'yes') {
       throw new ApiError(

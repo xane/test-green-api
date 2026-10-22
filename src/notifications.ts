@@ -14,7 +14,10 @@ export function parseIncoming(body: Record<string, unknown>): IncomingMessage | 
   let text: unknown;
   if (data.typeMessage === 'textMessage' && isRecord(data.textMessageData))
     text = data.textMessageData.textMessage;
-  if (data.typeMessage === 'extendedTextMessage' && isRecord(data.extendedTextMessageData))
+  if (
+    (data.typeMessage === 'extendedTextMessage' || data.typeMessage === 'quotedMessage') &&
+    isRecord(data.extendedTextMessageData)
+  )
     text = data.extendedTextMessageData.text;
   if (
     typeof text !== 'string' ||
@@ -90,6 +93,7 @@ export async function pollNotifications(
         // Unsupported events must also be acknowledged so they do not block FIFO.
         await api.deleteNotification(notification.receiptId, signal);
       }
+      if (signal.aborted) break;
       failures = 0;
       onStatus({ kind: 'connected' });
       // Also avoid a tight loop if an upstream gateway returns null immediately.
