@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { App } from '../src/App';
 import { incoming, pendingRequest } from './fixtures';
 
-function mockApi({ failSend = false, invalidSettings = false } = {}) {
+function mockApi({ failSend = false, invalidSettings = false, suspendedSend = false } = {}) {
   let deliver = false;
   let delivered = false;
   let receiveSignal: AbortSignal | null | undefined;
@@ -12,6 +12,7 @@ function mockApi({ failSend = false, invalidSettings = false } = {}) {
     if (url.includes('/getStateInstance/')) return Response.json({ stateInstance: 'authorized' });
     if (url.includes('/getSettings/'))
       return Response.json({
+        typeInstance: 'v3',
         webhookUrl: invalidSettings ? 'https://example.com' : '',
         incomingWebhook: 'yes',
       });
@@ -19,6 +20,7 @@ function mockApi({ failSend = false, invalidSettings = false } = {}) {
     if (url.includes('/sendMessage/')) {
       if (failSend) throw new TypeError('Network error');
       deliver = true;
+      if (suspendedSend) return new Response('Your account is suspended', { status: 403 });
       return Response.json({ idMessage: 'outgoing-1' });
     }
     if (url.includes('/receiveNotification/')) {
@@ -51,6 +53,20 @@ async function createChat(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe('chat user journey', () => {
+  it('continues receiving when MAX temporarily restricts sending', async () => {
+    mockApi({ suspendedSend: true });
+    const user = userEvent.setup();
+    render(<App />);
+    await login(user);
+    await createChat(user);
+    const composer = screen.getByRole('textbox', { name: 'Сообщение' });
+    await user.type(composer, 'Текст сохранится{Enter}');
+    expect(await screen.findByRole('alert')).toHaveTextContent('MAX временно ограничил отправку');
+    expect(await screen.findByText('Привет из теста!')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Подключено');
+    expect(composer).toBeEnabled();
+    expect(composer).toHaveValue('Текст сохранится');
+  });
   it('connects, creates a canonical chat, sends on Enter, receives an answer and clears the session', async () => {
     const api = mockApi();
     const user = userEvent.setup();

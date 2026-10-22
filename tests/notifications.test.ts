@@ -4,6 +4,34 @@ import { parseIncoming, pollNotifications } from '../src/notifications';
 import { incoming } from './fixtures';
 
 describe('notification processing', () => {
+  it('shows a text reply created with the Reply action in MAX', () => {
+    const notification = incoming('quoted-reply');
+    notification.body.messageData = {
+      typeMessage: 'quotedMessage',
+      extendedTextMessageData: {
+        text: 'Отвечаю на ваше сообщение',
+        stanzaId: 'original',
+        participant: '10000001',
+      },
+    };
+    expect(parseIncoming(notification.body)?.message.text).toBe('Отвечаю на ваше сообщение');
+  });
+  it('does not announce reconnection after cancellation during acknowledgement', async () => {
+    const controller = new AbortController();
+    const onStatus = vi.fn();
+    await pollNotifications(
+      {
+        receiveNotification: vi.fn().mockResolvedValue(incoming()),
+        deleteNotification: vi.fn(async () => {
+          controller.abort();
+        }),
+      },
+      controller.signal,
+      vi.fn(),
+      onStatus,
+    );
+    expect(onStatus).not.toHaveBeenCalled();
+  });
   it('does not process a late response after the connection is cancelled', async () => {
     const controller = new AbortController();
     const onMessage = vi.fn();

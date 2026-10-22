@@ -3,6 +3,32 @@ import { ApiError, GreenApi, normalizePhone, validateCredentials } from '../src/
 import { credentials, pendingRequest } from './fixtures';
 
 describe('API contract', () => {
+  it.each(['whatsapp', 'telegram', undefined])(
+    'rejects a non-MAX or unknown instance type: %s',
+    async (typeInstance) => {
+      vi.stubGlobal(
+        'fetch',
+        vi
+          .fn()
+          .mockResolvedValueOnce(Response.json({ stateInstance: 'authorized' }))
+          .mockResolvedValueOnce(
+            Response.json({ typeInstance, incomingWebhook: 'yes', webhookUrl: '' }),
+          ),
+      );
+      await expect(new GreenApi(credentials).connect(new AbortController().signal)).rejects.toThrow(
+        'инстанс MAX',
+      );
+    },
+  );
+  it('keeps a temporary sending restriction distinct from invalid credentials', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response('Your account is suspended', { status: 403 })),
+    );
+    await expect(
+      new GreenApi(credentials).sendMessage('10000001', 'Привет', new AbortController().signal),
+    ).rejects.toMatchObject({ kind: 'api' });
+  });
   it('rejects empty or oversized messages before making a request', async () => {
     const mock = vi.fn();
     vi.stubGlobal('fetch', mock);
@@ -62,7 +88,9 @@ describe('API contract', () => {
     const mock = vi
       .fn()
       .mockResolvedValueOnce(Response.json({ stateInstance: 'authorized' }))
-      .mockResolvedValueOnce(Response.json({ incomingWebhook: 'no', webhookUrl: '' }));
+      .mockResolvedValueOnce(
+        Response.json({ typeInstance: 'v3', incomingWebhook: 'no', webhookUrl: '' }),
+      );
     vi.stubGlobal('fetch', mock);
     await expect(new GreenApi(credentials).connect(new AbortController().signal)).rejects.toThrow(
       'включите входящие уведомления',
