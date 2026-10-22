@@ -7,7 +7,10 @@ test.beforeEach(async ({ page }) => {
   await page.clock.setFixedTime(screenshotTime);
 });
 
-async function mockApi(page: Page, failSend = false) {
+async function mockApi(
+  page: Page,
+  { failSend = false, quotedReply = false, wrongInstance = false } = {},
+) {
   let sent = 0;
   let acknowledged = false;
   const sendBodies: unknown[] = [];
@@ -15,7 +18,12 @@ async function mockApi(page: Page, failSend = false) {
     const url = route.request().url();
     let json: unknown = null;
     if (url.includes('/getStateInstance/')) json = { stateInstance: 'authorized' };
-    else if (url.includes('/getSettings/')) json = { incomingWebhook: 'yes', webhookUrl: '' };
+    else if (url.includes('/getSettings/'))
+      json = {
+        typeInstance: wrongInstance ? 'whatsapp' : 'v3',
+        incomingWebhook: 'yes',
+        webhookUrl: '',
+      };
     else if (url.includes('/checkAccount/')) json = { exist: true, chatId: '10000001' };
     else if (url.includes('/sendMessage/')) {
       sent++;
@@ -29,6 +37,15 @@ async function mockApi(page: Page, failSend = false) {
       // Repeat the same receipt until acknowledged, as the real queue does.
       if (sent && !acknowledged && !failSend) {
         const notification = incoming('incoming-1', '10000001', 'Привет! Да, всё работает.');
+        if (quotedReply)
+          notification.body.messageData = {
+            typeMessage: 'quotedMessage',
+            extendedTextMessageData: {
+              text: 'Ответ через кнопку Ответить',
+              stanzaId: 'outgoing-1',
+              participant: '10000001',
+            },
+          };
         notification.body.timestamp = screenshotTime.getTime() / 1000 + 60;
         json = notification;
       }
@@ -85,7 +102,7 @@ test('desktop: sends and receives, acknowledges the queue and renders only once'
 });
 
 test('network failure retains the draft and does not resend', async ({ page }) => {
-  const api = await mockApi(page, true);
+  const api = await mockApi(page, { failSend: true });
   await login(page);
   await createChat(page);
   const composer = page.getByRole('textbox', { name: 'Сообщение', exact: true });
@@ -94,6 +111,31 @@ test('network failure retains the draft and does not resend', async ({ page }) =
   await expect(page.getByRole('alert')).toContainText('сообщение могло уйти');
   await expect(composer).toHaveValue('Текст не должен потеряться');
   expect(api.sent()).toBe(1);
+});
+
+test('a text reply with a quote is shown in the original conversation', async ({ page }) => {
+  const api = await mockApi(page, { quotedReply: true });
+  await login(page);
+  await createChat(page);
+  await page.getByRole('textbox', { name: 'Сообщение', exact: true }).fill('Сообщение для ответа');
+  await page.getByRole('button', { name: 'Отправить сообщение' }).click();
+  await expect(
+    page
+      .getByRole('log', { name: 'Сообщения' })
+      .getByText('Ответ через кнопку Ответить', { exact: true }),
+  ).toHaveCount(1);
+  await expect.poll(api.acknowledged).toBe(true);
+  await expect(page.getByRole('button', { name: /Открыть чат/ })).toHaveCount(1);
+});
+
+test('a WhatsApp instance cannot silently connect as MAX', async ({ page }) => {
+  await mockApi(page, { wrongInstance: true });
+  await page.goto('/');
+  await page.getByLabel(/ID инстанса/).fill('3100000000');
+  await page.getByLabel(/API-токен/).fill('test-token-not-real');
+  await page.getByRole('button', { name: /Начать общение/ }).click();
+  await expect(page.getByRole('alert')).toContainText('нужен инстанс MAX');
+  await expect(page.getByRole('button', { name: 'Новый чат' })).toHaveCount(0);
 });
 
 test('mobile: list and conversation have separate screens, Shift+Enter keeps a newline', async ({
